@@ -7,12 +7,12 @@ import streamlit as st
 # ---------- Loaders & Splitters ----------
 try:
     from langchain_community.document_loaders import PyPDFLoader, TextLoader
-except:
+except ImportError:
     from langchain.document_loaders import PyPDFLoader, TextLoader
 
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
-except:
+except ImportError:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # ---------- Embeddings ----------
@@ -22,7 +22,6 @@ from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 
-
 # ---------------- CONFIG ----------------
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 MAX_CONTEXT_CHARS = 4000
@@ -30,11 +29,12 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 # ----------------------------------------
 
 
-# ---------- Groq Streaming (Permanent Fix) ----------
+# ---------- Groq Streaming ----------
 def groq_stream(messages, placeholder, model="llama-3.1-8b-instant"):
+
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        placeholder.error("No GROQ_API_KEY found in environment variables.")
+        placeholder.error("❌ GROQ_API_KEY missing. Add it in Streamlit Cloud → Secrets.")
         return ""
 
     headers = {
@@ -77,26 +77,33 @@ def groq_stream(messages, placeholder, model="llama-3.1-8b-instant"):
 # ---------- Prompts ----------
 def prompt_qa(ctx, q):
     return [
-        {"role": "system", "content": "Answer ONLY using the provided context. If not available, say 'I cannot answer from the text.'"},
+        {"role": "system", "content": "Answer ONLY using the context. If the answer is not there, say 'I cannot answer from the text.'"},
         {"role": "user", "content": f"Context:\n{ctx}\n\nQuestion: {q}\n\nAnswer:"}
     ]
 
 def prompt_notes(ctx):
     return [
-        {"role": "system", "content": "Create structured, detailed notes."},
+        {"role": "system", "content": "Create structured, clean notes."},
         {"role": "user", "content": f"Content:\n{ctx}\n\nWrite detailed notes:"}
     ]
 
 def prompt_short(ctx):
     return [
-        {"role": "system", "content": "Create concise bullets summarizing the content."},
+        {"role": "system", "content": "Summarize concisely."},
         {"role": "user", "content": f"Content:\n{ctx}\n\nWrite 5–10 bullet points:"}
     ]
 
 def prompt_quiz(ctx, n):
     return [
-        {"role": "system", "content": "Create multiple-choice questions with answers."},
-        {"role": "user", "content": f"Content:\n{ctx}\n\nWrite {n} MCQs with format:\nQ1: ...\nA)\nB)\nC)\nD)\nCorrect Answer:"}
+        {"role": "system", "content": "Create MCQs with answers."},
+        {"role": "user", "content": f"Content:\n{ctx}\n\nWrite {n} MCQs:\nQ1: ...\nA)\nB)\nC)\nD)\nCorrect Answer:"}
+    ]
+
+# NEW: fallback doc classifier
+def prompt_doc_classifier(full_text):
+    return [
+        {"role": "system", "content": "Identify the type of document (CV, resume, report, article, textbook, letter, etc). Be direct."},
+        {"role": "user", "content": f"Here is the document:\n\n{full_text}\n\nWhat type of document is this?"}
     ]
 
 
@@ -111,7 +118,6 @@ def load_file(upload):
             loader = PyPDFLoader(path)
         else:
             loader = TextLoader(path, encoding="utf-8")
-
         return loader.load()
     finally:
         os.unlink(path)
@@ -124,12 +130,12 @@ def get_embedder():
     return st.session_state.embedder
 
 
-# ---------- Qdrant (In-Memory) ----------
+# ---------- Qdrant ----------
 def init_qdrant():
     st.session_state.qdrant = QdrantClient(":memory:")
 
 def index_documents(documents):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=250, chunk_overlap=50)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=250, chunk_overlap=40)
     chunks = splitter.split_documents(documents)
     texts = [c.page_content for c in chunks]
 
@@ -147,7 +153,7 @@ def index_documents(documents):
         for i in range(len(texts))
     ]
 
-    qdrant.upsert(collection_name="docs", points=points)
+    qdrant.upsert("docs", points)
     st.session_state.texts = texts
 
 
@@ -156,11 +162,7 @@ def retrieve(query, top_k=3):
     q_vec = embedder.encode([query])[0]
 
     qdrant = st.session_state.qdrant
-    results = qdrant.search(
-        collection_name="docs",
-        query_vector=q_vec,
-        limit=top_k,
-    )
+    results = qdrant.search("docs", query_vector=q_vec, limit=top_k)
 
     ctx = "\n\n".join(hit.payload["text"] for hit in results)
     return ctx[:MAX_CONTEXT_CHARS]
@@ -168,28 +170,26 @@ def retrieve(query, top_k=3):
 
 # -------------------- STREAMLIT UI --------------------
 
-st.set_page_config(page_title="AmbedkarGPT — Groq + Qdrant", layout="wide")
-st.title("📚 Prep Pal")
-st.write("Stable, fast, dependency-free version optimized for your system.")
+st.set_page_config(page_title="AmbedkarGPT — Fast RAG", layout="wide")
+st.title("📚 AmbedkarGPT — Fast RAG (Groq + Qdrant In-Memory)")
+st.write("Stable, fast, cloud-friendly version.")
 
 with st.sidebar:
-    st.header("Upload Document")
+    st.header("📂 Upload Document")
     upload = st.file_uploader("Upload PDF or TXT", type=["pdf", "txt"])
 
     if upload:
         if st.button("Process Document"):
-            with st.spinner("Loading document..."):
+            with st.spinner("Loading..."):
                 docs = load_file(upload)
-
-            with st.spinner("Indexing in memory..."):
+            with st.spinner("Indexing..."):
                 init_qdrant()
                 index_documents(docs)
-
-            st.success("Indexed successfully!")
+            st.success("Document indexed!")
 
 
 if "qdrant" not in st.session_state:
-    st.info("Please upload a document to begin.")
+    st.info("Upload a document to begin.")
     st.stop()
 
 
@@ -199,11 +199,23 @@ tab1, tab2, tab3, tab4 = st.tabs(["💬 Q&A", "📝 Notes", "📋 Short Notes", 
 # Q&A
 with tab1:
     q = st.text_input("Ask a question:")
+
     if q:
         ctx = retrieve(q)
         placeholder = st.empty()
+
+        # If vague question, classify document type instead
+        vague = any(v in q.lower().strip() for v in [
+            "what is this", "what is this pdf", "what is this document",
+            "what is this about", "describe this", "tell me about this pdf"
+        ])
+
         with st.spinner("Thinking..."):
-            groq_stream(prompt_qa(ctx, q), placeholder)
+            if vague:
+                full_text = "\n\n".join(st.session_state.texts)[:MAX_CONTEXT_CHARS]
+                groq_stream(prompt_doc_classifier(full_text), placeholder)
+            else:
+                groq_stream(prompt_qa(ctx, q), placeholder)
 
 # Notes
 with tab2:
@@ -219,7 +231,7 @@ with tab3:
     if st.button("Generate Short Notes"):
         ctx = "\n\n".join(st.session_state.texts)[:MAX_CONTEXT_CHARS]
         placeholder = st.empty()
-        with st.spinner("Generating summary..."):
+        with st.spinner("Generating..."):
             s = groq_stream(prompt_short(ctx), placeholder)
         st.download_button("Download Summary", s, "short_notes.txt")
 
