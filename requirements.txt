@@ -1,0 +1,7 @@
+streamlit==1.36.0
+requests
+sentence-transformers
+qdrant-client
+langchain-community
+langchain-text-splitters
+pypdf
