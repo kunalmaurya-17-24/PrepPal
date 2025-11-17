@@ -1,3 +1,15 @@
+# 📘 **Prep Pal — AI-Powered Study Assistant (RAG + Groq + Qdrant + Streamlit)**
+
+Prep Pal is an intelligent study-assistant application that converts PDF or text documents into meaningful learning resources.
+Using **in-memory Qdrant**, **HuggingFace MiniLM embeddings**, and **Groq’s Llama-3.1-8B-Instant** model, the system provides:
+
+* 📚 **Context-aware Q&A**
+* 📝 **Detailed Notes**
+* 📋 **Short Notes & Summaries**
+* ❓ **Auto-generated Quizzes**
+
+All inside a clean, fast, and responsive **Streamlit** interface.
+
 ---
 
 ## 🚀 **Features**
